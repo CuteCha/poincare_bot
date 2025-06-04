@@ -11,6 +11,7 @@ import pyaudio
 import wave
 import numpy as np
 import os
+import webrtcvad
 
 
 #llm
@@ -34,6 +35,25 @@ asr_url = "http://192.168.124.230:40062/api/v1/asr"
 #tts
 tts_url = "http://192.168.124.230:40066/api/voice/tts"
 
+#vad
+VAD_MODE = 3
+vad = webrtcvad.Vad()
+vad.set_mode(VAD_MODE)
+
+def check_vad_activity(audio_data):
+    num, rate = 0, 0.5
+    step = int(RATE * 0.02)  # 20ms chunk
+    flag_rate = round(rate * len(audio_data) // step)
+
+    for i in range(0, len(audio_data), step):
+        chunk = audio_data[i:i + step]
+        if len(chunk) == step:
+            if vad.is_speech(chunk, sample_rate=RATE):
+                num += 1
+
+    if num > flag_rate:
+        return True
+    return False
 
 def stream_chat_response(messages):
     response = llm_client.chat.completions.create(
