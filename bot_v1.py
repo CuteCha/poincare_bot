@@ -203,7 +203,7 @@ def main():
         messages = [
             {"role": "system", "content": "You are a helpful assistant."},
             *[{"role": "user" if i % 2 == 0 else "assistant", "content": msg} for i, msg in enumerate(sum(history, ()))],
-            {"role": "user", "content": query}
+            {"role": "user", "content": f"{query}，请简洁回答，保持在50个字以内。"}
         ]
 
         full_text = ""
