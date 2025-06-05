@@ -1,5 +1,4 @@
 import requests
-import json
 import io
 import pygame
 import threading
@@ -94,7 +93,7 @@ class AudioRecorder:
         return self.save_audio()
 
     def save_audio(self):
-        filename = f"recording_{int(time.time())}.wav"
+        filename = f"./tmp/recording_{int(time.time())}.wav"
         wf = wave.open(filename, 'wb')
         wf.setnchannels(CHANNELS)
         wf.setsampwidth(self.audio.get_sample_size(FORMAT))
