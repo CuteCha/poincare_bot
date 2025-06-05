@@ -3,12 +3,15 @@ import wave
 import threading
 import numpy as np
 import time
-from queue import Queue
+import queue
+import random
 import webrtcvad
 import os
+import io
 import threading
 import pygame
 import requests
+from openai import OpenAI
 
 AUDIO_RATE = 16000        
 AUDIO_CHANNELS = 1        
@@ -18,6 +21,14 @@ OUTPUT_DIR = "./tmp/output"
 NO_SPEECH_THRESHOLD = 1  
 audio_file_count = 0
 asr_url = "http://192.168.124.230:40062/api/v1/asr"
+tts_url = "http://192.168.124.230:40066/api/voice/tts"
+
+openai_api_key = "token_abc123" 
+openai_api_base = "http://192.168.124.230:40060/v1" 
+llm_client = OpenAI(
+    api_key=openai_api_key,
+    base_url=openai_api_base,
+)
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
@@ -131,10 +142,23 @@ def audio_recorder():
     stream.close()
     p.terminate()
 
-def play_audio(file_path):
+def play_audio01(file_path):
     try:
         pygame.mixer.init()
         pygame.mixer.music.load(file_path)
+        pygame.mixer.music.play()
+        while pygame.mixer.music.get_busy():
+            time.sleep(1)  
+        print("播放完成！")
+    except Exception as e:
+        print(f"播放失败: {e}")
+    finally:
+        pygame.mixer.quit()
+
+def play_audio(audio):
+    try:
+        pygame.mixer.init()
+        pygame.mixer.music.load(audio)
         pygame.mixer.music.play()
         while pygame.mixer.music.get_busy():
             time.sleep(1)  
@@ -157,12 +181,46 @@ def asr_request(prepared_file):
         print(f"ASR Error: Received status code {response.status_code}")
         return None
 
+def tts_request(text):
+    response = requests.get(tts_url, params={"query": text})  
+    if response.status_code == 200:
+        audio_data = io.BytesIO(response.content)
+        return audio_data
+    else:
+        print(f"Error: Received status code {response.status_code}")
+        return None
+
+def llm_request(messages):
+    response = llm_client.chat.completions.create(
+        model="Qwen2.5-1.5B-Instruct",
+        messages=messages,
+        stream=False
+    )
+
+    return response.choices[0].message.content
+
+def llm_request_stream(messages):
+    response = llm_client.chat.completions.create(
+        model="Qwen2.5-1.5B-Instruct",
+        messages=messages,
+        stream=True
+    )
+
+    full_text = ""
+    for chunk in response:
+        if chunk.choices[0].delta.content:
+            new_content = chunk.choices[0].delta.content
+            full_text += new_content
+            yield new_content, full_text
+
+
 def inference(TEMP_AUDIO_FILE=f"{OUTPUT_DIR}/audio_0.wav"):
     audio_file = TEMP_AUDIO_FILE
     print(f"audio_file: {audio_file}")
     result = asr_request(audio_file)
     query = result['result'][0]['clean_text']
     print(f"ars: {query}")
+    prompt=f"{query}，回答简短一些，保持50字以内！"
 
     # messages = [
     #         {"role": "system", "content": "你叫千问，是一个18岁的女大学生，性格活泼开朗，说话俏皮"},
@@ -170,7 +228,247 @@ def inference(TEMP_AUDIO_FILE=f"{OUTPUT_DIR}/audio_0.wav"):
     #         {"role": "user", "content": query}
     #     ]
 
+    # messages = [
+    #     {"role": "system", "content": "你叫千问，是一个18岁的女大学生，性格活泼开朗，说话俏皮"},
+    #     {"role": "user", "content": prompt},
+    # ]
+
+    answer02(prompt)
+
+
+def _test01():
+    pygame.mixer.init()
+    prompt="中国最大的城市是哪个？，回答简短一些，保持50字以内！"
+    messages = [
+        {"role": "system", "content": "你叫千问，是一个18岁的女大学生，性格活泼开朗，说话俏皮"},
+        {"role": "user", "content": prompt},
+    ]
+
+    text=llm_request(messages)
+    print(text)
+    audio=tts_request(text)
+    pygame.mixer.music.load(audio)
+    pygame.mixer.music.play()
+    while pygame.mixer.music.get_busy():
+        pygame.time.Clock().tick(10)
+
+def _test02():
+    prompt="中国最大的城市是哪个？" #"，回答简短一些，保持50字以内！"
+    messages = [
+        {"role": "system", "content": "你叫千问，是一个18岁的女大学生，性格活泼开朗，说话俏皮"},
+        {"role": "user", "content": prompt},
+    ]
+
+    text=llm_request(messages)
+    print(text)
+    audio=tts_request(text)
+    play_audio(audio)
+
+def answer02(question):
+    prompt = question
+    messages = [
+        {"role": "system", "content": "你叫千问，是一个18岁的女大学生，性格活泼开朗，说话俏皮"},
+        {"role": "user", "content": prompt},
+    ]
+
+    text=llm_request(messages)
+    print(text)
+    audio=tts_request(text)
+    play_audio(audio)
+
+def clear_lines():
+    print("\033[2J")
+
+def truncate_to_last_sentence(text):
+    last_punct = max(text.rfind('！'), text.rfind('。'), text.rfind('？'))
+    if last_punct != -1:
+        return text[:last_punct + 1]
+    return text
+
+def clean_text(text):
+    text = text.replace("\n", "")
+    text = text.replace("*", "")
+    return text
+
+class AudioPlayer:
+    def __init__(self):
+        self.text_queue = queue.Queue()
+        self.audio_data_queue = queue.Queue()
+        self.is_playing = False
+        pygame.mixer.init()
+        threading.Thread(target=self._request_audio_thread, daemon=True).start()
+        threading.Thread(target=self._play_audio_thread, daemon=True).start()
+
+    def add_to_queue(self, text):
+        self.text_queue.put(text)
+
+    def _request_audio_thread(self):
+        while True:
+            text = self.text_queue.get()
+            response = requests.get(tts_url, params={"query": text})
+            
+            if response.status_code == 200:
+                audio_data = io.BytesIO(response.content)
+                self.audio_data_queue.put(audio_data)
+            else:
+                print(f"Error: Received status code {response.status_code}")
+            
+            self.text_queue.task_done()
+
+    def _play_audio_thread(self):
+        while True:
+            audio_data = self.audio_data_queue.get()
+            self._play_audio(audio_data)
+            time.sleep(0.8 + 0.1 * abs(random.random()))
+            self.audio_data_queue.task_done()
+
+    def _play_audio(self, audio_data):
+        self.is_playing = True
+        pygame.mixer.music.load(audio_data)
+        pygame.mixer.music.play()
+        while pygame.mixer.music.get_busy():
+            pygame.time.Clock().tick(10)
+        self.is_playing = False
+
+def _test03():
+    prompt="中国最大的城市是哪个？" 
+    messages = [
+        {"role": "system", "content": "你叫千问，是一个18岁的女大学生，性格活泼开朗，说话俏皮"},
+        {"role": "user", "content": prompt},
+    ]
+
+    # text=llm_request_stream(messages)
+    # print(text)
+    # audio=tts_request(text)
+    # play_audio(audio)
+
+    full_text = ""
+    audio_chunk = ""
+
+    for new_content, full_text in llm_request_stream(messages):
+        clear_lines()
+        print("You said: ", prompt)
+        print("AI said: ", full_text)
+        audio_chunk += new_content
+
+        if ('！' in audio_chunk or '？' in audio_chunk or '。' in audio_chunk) and len(audio_chunk) > 55:
+            truncated_chunk = truncate_to_last_sentence(audio_chunk)
+            if truncated_chunk:
+                cleaned_chunk = clean_text(truncated_chunk)
+                # audio_player.add_to_queue(cleaned_chunk)
+                play_audio(tts_request(cleaned_chunk))
+                audio_chunk = audio_chunk[len(truncated_chunk):]
+
+    if audio_chunk:
+        truncated_chunk = truncate_to_last_sentence(audio_chunk)
+        if truncated_chunk:
+            # audio_player.add_to_queue(truncated_chunk)
+            play_audio(tts_request(truncated_chunk))
+        if len(audio_chunk) > len(truncated_chunk):
+            # audio_player.add_to_queue(audio_chunk[len(truncated_chunk):])
+            play_audio(tts_request(audio_chunk[len(truncated_chunk):]))
+
+def _test04():
+    audio_player = AudioPlayer()
+    prompt="中国最大的城市是哪个？" 
+    messages = [
+        {"role": "system", "content": "你叫千问，是一个18岁的女大学生，性格活泼开朗，说话俏皮"},
+        {"role": "user", "content": prompt},
+    ]
+
+    full_text = ""
+    audio_chunk = ""
+
+    for new_content, full_text in llm_request_stream(messages):
+        clear_lines()
+        print("You said: ", prompt)
+        print("AI said: ", full_text)
+        audio_chunk += new_content
+
+        if ('！' in audio_chunk or '？' in audio_chunk or '。' in audio_chunk) and len(audio_chunk) > 55:
+            truncated_chunk = truncate_to_last_sentence(audio_chunk)
+            if truncated_chunk:
+                cleaned_chunk = clean_text(truncated_chunk)
+                audio_player.add_to_queue(cleaned_chunk)
+                audio_chunk = audio_chunk[len(truncated_chunk):]
+
+    if audio_chunk:
+        truncated_chunk = truncate_to_last_sentence(audio_chunk)
+        if truncated_chunk:
+            audio_player.add_to_queue(truncated_chunk)
+        if len(audio_chunk) > len(truncated_chunk):
+            audio_player.add_to_queue(audio_chunk[len(truncated_chunk):])
+    
+    audio_player.text_queue.join()
+    audio_player.audio_data_queue.join()
+
+def answer03(question):
+    prompt = question
+    messages = [
+        {"role": "system", "content": "你叫千问，是一个18岁的女大学生，性格活泼开朗，说话俏皮"},
+        {"role": "user", "content": prompt},
+    ]
+
+    full_text = ""
+    audio_chunk = ""
+
+    for new_content, full_text in llm_request_stream(messages):
+        clear_lines()
+        print("You said: ", prompt)
+        print("AI said: ", full_text)
+        audio_chunk += new_content
+
+        if ('！' in audio_chunk or '？' in audio_chunk or '。' in audio_chunk) and len(audio_chunk) > 55:
+            truncated_chunk = truncate_to_last_sentence(audio_chunk)
+            if truncated_chunk:
+                cleaned_chunk = clean_text(truncated_chunk)
+                play_audio(tts_request(cleaned_chunk))
+                audio_chunk = audio_chunk[len(truncated_chunk):]
+
+    if audio_chunk:
+        truncated_chunk = truncate_to_last_sentence(audio_chunk)
+        if truncated_chunk:
+            play_audio(tts_request(truncated_chunk))
+        if len(audio_chunk) > len(truncated_chunk):
+            play_audio(tts_request(audio_chunk[len(truncated_chunk):]))
+
+def answer04(question):
+    audio_player = AudioPlayer()
+    prompt = question
+    # prompt="中国最大的城市是哪个？" 
+    messages = [
+        {"role": "system", "content": "你叫千问，是一个18岁的女大学生，性格活泼开朗，说话俏皮"},
+        {"role": "user", "content": prompt},
+    ]
+
+    full_text = ""
+    audio_chunk = ""
+
+    for new_content, full_text in llm_request_stream(messages):
+        clear_lines()
+        print("You said: ", prompt)
+        print("AI said: ", full_text)
+        audio_chunk += new_content
+
+        if ('！' in audio_chunk or '？' in audio_chunk or '。' in audio_chunk) and len(audio_chunk) > 55:
+            truncated_chunk = truncate_to_last_sentence(audio_chunk)
+            if truncated_chunk:
+                cleaned_chunk = clean_text(truncated_chunk)
+                audio_player.add_to_queue(cleaned_chunk)
+                audio_chunk = audio_chunk[len(truncated_chunk):]
+
+    if audio_chunk:
+        truncated_chunk = truncate_to_last_sentence(audio_chunk)
+        if truncated_chunk:
+            audio_player.add_to_queue(truncated_chunk)
+        if len(audio_chunk) > len(truncated_chunk):
+            audio_player.add_to_queue(audio_chunk[len(truncated_chunk):])
+    
+    audio_player.text_queue.join()
+    audio_player.audio_data_queue.join()
+
 def main():
+    global recording_active
     try:
         audio_thread = threading.Thread(target=audio_recorder)
         audio_thread.start()
@@ -186,5 +484,6 @@ def main():
         print("录制已停止")
 
 if __name__ == "__main__":
-    #main()
-    inference("./tmp/output/audio_1.wav")
+    main()
+    # inference("./tmp/output/audio_1.wav")
+    # _test04()
