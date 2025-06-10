@@ -93,7 +93,7 @@ def save_audio_video():
     wf.setframerate(AUDIO_RATE)
     wf.writeframes(b''.join(audio_frames))
     wf.close()
-    print(f"音频保存至 {audio_output_path}")
+    print(f"音频收集完成，保存至 {audio_output_path}")
     
     inference_thread = threading.Thread(target=inference, args=(audio_output_path,))
     inference_thread.start()
@@ -123,11 +123,12 @@ def audio_recorder():
             vad_result = check_vad_activity(raw_audio)
             
             if vad_result:
-                print("检测到语音活动")
+                print("检测到语音活动，开始收集语音......")
                 last_active_time = time.time()
                 segments_to_save.append((raw_audio, time.time()))
             else:
-                print("静音中...")
+                # print("静音中...")
+                pass
             
             audio_buffer = [] 
         
@@ -220,7 +221,7 @@ def inference(TEMP_AUDIO_FILE=f"{OUTPUT_DIR}/audio_0.wav"):
     result = asr_request(audio_file)
     query = result['result'][0]['clean_text']
     print(f"ars: {query}")
-    prompt=f"{query}，回答简短一些，保持50字以内！"
+    prompt= query #f"{query}，回答简短一些，保持50字以内！"
 
     # messages = [
     #         {"role": "system", "content": "你叫千问，是一个18岁的女大学生，性格活泼开朗，说话俏皮"},
@@ -233,7 +234,7 @@ def inference(TEMP_AUDIO_FILE=f"{OUTPUT_DIR}/audio_0.wav"):
     #     {"role": "user", "content": prompt},
     # ]
 
-    answer02(prompt)
+    answer03(prompt)
 
 
 def _test01():
@@ -414,8 +415,8 @@ def answer03(question):
 
     for new_content, full_text in llm_request_stream(messages):
         clear_lines()
-        print("You said: ", prompt)
-        print("AI said: ", full_text)
+        print("USER: ", prompt)
+        print("AI: ", full_text)
         audio_chunk += new_content
 
         if ('！' in audio_chunk or '？' in audio_chunk or '。' in audio_chunk) and len(audio_chunk) > 55:

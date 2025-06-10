@@ -169,7 +169,7 @@ class AudioPlayer:
         pygame.mixer.music.load(audio_data)
         pygame.mixer.music.play()
         while pygame.mixer.music.get_busy():
-            pygame.time.Clock().tick(10)
+            pygame.time.Clock().tick(100)
         self.is_playing = False
 
 
