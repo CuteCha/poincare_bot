@@ -10,6 +10,7 @@ import pyaudio
 import wave
 import numpy as np
 import os
+import webrtcvad
 
 
 #llm
@@ -24,7 +25,7 @@ llm_client = OpenAI(
 CHUNK = 1024
 FORMAT = pyaudio.paInt16
 CHANNELS = 1
-RATE = 44100
+RATE = 16000
 SILENCE_THRESHOLD = 500
 SILENCE_DURATION = 1  # seconds
 LANG = 'zh'
@@ -70,6 +71,7 @@ class AudioRecorder:
         self.frames = []
         self.is_recording = False
         self.silence_start = None
+        self.vad = webrtcvad.Vad(0)
 
     def start_recording(self):
         self.is_recording = True
@@ -81,7 +83,7 @@ class AudioRecorder:
             stream_callback=self.callback
         )
         self.stream.start_stream()
-        print("Recording started...")
+        print("声音录制开始...")
 
     def stop_recording(self):
         if self.stream:
@@ -89,10 +91,11 @@ class AudioRecorder:
             self.stream.close()
         self.stream = None
         self.is_recording = False
-        print("Recording stopped.")
+        print("声音录制结束.")
         return self.save_audio()
 
     def save_audio(self):
+        print(f"len(frames): {len(self.frames)}")
         filename = f"./tmp/recording_{int(time.time())}.wav"
         wf = wave.open(filename, 'wb')
         wf.setnchannels(CHANNELS)
@@ -102,16 +105,36 @@ class AudioRecorder:
         wf.close()
         return filename
 
+    def check_vad_activity(self, audio_data):
+        num, rate = 0, 0.8
+        step = int(16000 * 0.02)  
+        flag_rate = round(rate * len(audio_data) // step)
+
+        for i in range(0, len(audio_data), step):
+            chunk = audio_data[i:i + step]
+            if len(chunk) == step:
+                if self.vad.is_speech(chunk, sample_rate=16000):
+                    num += 1
+
+        if num > flag_rate:
+            return True
+        return False
+    
     def callback(self, in_data, frame_count, time_info, status):
         if self.is_recording:
             self.frames.append(in_data)
             amplitude = np.frombuffer(in_data, dtype=np.int16).max()
-            if amplitude < SILENCE_THRESHOLD:
+            is_speak = self.check_vad_activity(in_data)
+
+            # print(f"amplitude: {amplitude}, is_speak: {is_speak}, silence_start: {self.silence_start}")
+
+            if amplitude < SILENCE_THRESHOLD or not is_speak:
                 if self.silence_start is None:
                     self.silence_start = time.time()
                 elif time.time() - self.silence_start > SILENCE_DURATION:
                     self.is_recording = False
             else:
+                # print("监测到声音,开始收集....")
                 self.silence_start = None
         return (in_data, pyaudio.paContinue)
 
@@ -119,7 +142,7 @@ class AudioRecorder:
         self.start_recording()
         try:
             while self.is_recording:
-                time.sleep(0.1)
+                time.sleep(2)
         except KeyboardInterrupt:
             pass
         finally:
@@ -194,11 +217,13 @@ def main():
     history = []
 
     while True:
-        print("Listening... (Speak now)")
+        t0=time.time()
+        print("🎤开始采集声音... (请说话)")
         audio_file = recorder.listen()
-        print("Processing speech...")
+        print(f"本次声音采集结束，开始处理...({time.time()-t0})")
         result = asr_request(audio_file)
         query = result['result'][0]['clean_text']
+        if query is None or query.strip()=='': continue
 
         messages = [
             {"role": "system", "content": "You are a helpful assistant."},
@@ -210,9 +235,9 @@ def main():
         audio_chunk = ""
 
         for new_content, full_text in stream_chat_response(messages):
-            clear_lines()
-            print("You said: ", query)
-            print("AI said: ", full_text)
+            # clear_lines()
+            # print("USER: ", query)
+            # print("🔉AI: ", full_text)
             audio_chunk += new_content
 
             if ('！' in audio_chunk or '？' in audio_chunk or '。' in audio_chunk) and len(audio_chunk) > 55:
@@ -228,7 +253,9 @@ def main():
                 audio_player.add_to_queue(truncated_chunk)
             if len(audio_chunk) > len(truncated_chunk):
                 audio_player.add_to_queue(audio_chunk[len(truncated_chunk):])
-
+        
+        print("USER: ", query)
+        print("🔉AI: ", full_text)
         history.append((query, full_text))
         history = history[-8:]
 
