@@ -142,7 +142,7 @@ class AudioRecorder:
         self.start_recording()
         try:
             while self.is_recording:
-                time.sleep(2)
+                time.sleep(0.1)
         except KeyboardInterrupt:
             pass
         finally:
