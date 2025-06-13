@@ -9,19 +9,21 @@ from openai import OpenAI
 import requests
 import io
 import os
+import numpy as np
 
 
 class AudioStream:
     def __init__(self):
         self.audio_rate = 16000
         self.audio_channels = 1
-        self.chunk = 1024
+        self.chunk = 480 #10 20 30 ms
         self.mic_rec_wav = "./tmp/mic_record_wav"
         self.no_speech_threshold = 1
         self.audio_num = 0
         self.vad = webrtcvad.Vad(0)
 
-        self.if_record = True
+        self.is_recording = True
+        self.silence_start = None
 
     def audio_recorder_stream(self, input_audio_queue:Queue):
         p = pyaudio.PyAudio()
@@ -31,28 +33,19 @@ class AudioStream:
                         input=True,
                         frames_per_buffer=self.chunk)
 
-        audio_buffer = []
         segments_to_save = []
         print("音频录制已开始")
 
-        while self.if_record:
+        while self.is_recording:
             data = stream.read(self.chunk)
-            audio_buffer.append(data)
 
-            # 每 0.5 秒检测一次 VAD 可能会错过开头的几个字
-            if len(audio_buffer) * self.chunk / self.audio_rate >= 0.5:
-                # 拼接音频数据并检测 VAD
-                raw_audio = b''.join(audio_buffer)
-                vad_result = self.check_vad_activity(raw_audio)
-
-                if vad_result:
-                    print("检测到语音活动")
-                    segments_to_save.append((raw_audio, time.time()))
-                else:
-                    # print("静音中...")
-                    pass
-
-                audio_buffer = []  # 清空缓冲区
+            vad_result = self.vad.is_speech(data, sample_rate=self.audio_rate)
+            if vad_result:
+                print("检测到语音活动")
+                segments_to_save.append((data, time.time()))
+            else:
+                # print("静音中...")
+                pass
 
             # 检查无效语音时间
             if segments_to_save and time.time() - segments_to_save[-1][-1] > self.no_speech_threshold:
@@ -101,7 +94,7 @@ def _test_audio_recorder():
 
     time.sleep(20)
 
-    audio_stream.if_record = False
+    audio_stream.is_recording = False
 
 class V2VLMM:
     def __init__(self):
