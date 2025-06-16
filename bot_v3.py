@@ -14,11 +14,9 @@ import webrtcvad
 
 
 #llm
-openai_api_key = "token_abc123" 
-openai_api_base = "http://192.168.124.230:40060/v1" 
 llm_client = OpenAI(
-    api_key=openai_api_key,
-    base_url=openai_api_base,
+    api_key="token_abc123",
+    base_url="http://192.168.124.230:40060/v1",
 )
 
 #asr
@@ -217,7 +215,7 @@ def main():
         t0=time.time()
         print("🎤开始采集声音... (请说话)")
         audio_file = recorder.listen()
-        print(f"本次声音采集结束，开始处理...({time.time()-t0})")
+        print(f"本次声音采集结束，耗时({time.time()-t0})s，开始处理...")
         result = asr_request(audio_file)
         query = result['result'][0]['clean_text']
         if query is None or query.strip()=='': continue
