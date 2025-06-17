@@ -215,7 +215,9 @@ class VoiceBot:
             print(f"本次声音采集结束，耗时({time.time()-t0})s，开始处理...")
             result = self.asr_request(audio_file)
             query = result['result'][0]['clean_text']
-            if query is None or query.strip()=='': continue
+            if query is None or query.strip()=='': 
+                print("没有录制到有效声音，聆听中......")
+                continue
 
             messages = [
                 {"role": "system", "content": "You are a helpful assistant."},
@@ -243,8 +245,8 @@ class VoiceBot:
                 if len(audio_chunk) > len(truncated_chunk):
                     self.audio_player.add_to_queue(audio_chunk[len(truncated_chunk):])
             
-            print("🎤USER: ", query)
-            print("🔉AI: ", full_text)
+            print(f"🎤\033[1;36mUSER: {query}\033[0m" )
+            print(f"🔉\033[1;31mAI: {full_text}\033[0m")
             self.history.append((query, full_text))
             if len(self.history)>8: self.history.pop(0)
 
@@ -253,7 +255,6 @@ class VoiceBot:
 
 
 if __name__ == '__main__':
-    # main()
     voice_bot=VoiceBot()
     voice_bot.run()
 
