@@ -13,62 +13,14 @@ import os
 import webrtcvad
 
 
-#llm
-llm_client = OpenAI(
-    api_key="token_abc123",
-    base_url="http://192.168.124.230:40060/v1",
-)
-
-#asr
 CHUNK = 1024
 FORMAT = pyaudio.paInt16
 CHANNELS = 1
 RATE = 16000
 SILENCE_THRESHOLD = 500
-SILENCE_DURATION = 1  # seconds
+SILENCE_DURATION = 1 
 LANG = 'zh'
-asr_url = "http://192.168.124.230:40062/api/v1/asr"
 
-#tts
-tts_url = "http://192.168.124.230:40066/api/voice/tts"
-
-
-def stream_chat_response(messages):
-    response = llm_client.chat.completions.create(
-        model="Qwen2.5-1.5B-Instruct",
-        messages=messages,
-        stream=True
-    )
-
-    full_text = ""
-    for chunk in response:
-        if chunk.choices[0].delta.content:
-            new_content = chunk.choices[0].delta.content
-            full_text += new_content
-            yield new_content, full_text
-
-def asr_request(prepared_file):
-    with open(prepared_file, 'rb') as f:
-        files = [('files', (prepared_file, f, 'audio/wav'))]
-        data = {'keys': prepared_file, 'lang': LANG}
-        response = requests.post(asr_url, files=files, data=data)
-    
-    os.remove(prepared_file)
-    if response.status_code == 200:
-        return response.json()
-    else:
-        print(f"ASR Error: Received status code {response.status_code}")
-        return None
-
-def tts_request(text: str):
-    response = requests.get(tts_url, params={"query": text})
-            
-    if response.status_code == 200:
-        audio_data = io.BytesIO(response.content)
-        return audio_data
-    else:
-        print(f"Error: Received status code {response.status_code}")
-        return None
 
 class AudioRecorder:
     def __init__(self):
@@ -160,6 +112,7 @@ class AudioRecorder:
 
 class AudioPlayer:
     def __init__(self):
+        self.tts_url = "http://192.168.124.230:40066/api/voice/tts"
         self.text_queue = queue.Queue()
         self.audio_data_queue = queue.Queue()
         self.is_playing = False
@@ -167,13 +120,23 @@ class AudioPlayer:
         threading.Thread(target=self._request_audio_thread, daemon=True).start()
         threading.Thread(target=self._play_audio_thread, daemon=True).start()
 
+    def tts_request(self, text: str):
+        response = requests.get(self.tts_url, params={"query": text})
+                
+        if response.status_code == 200:
+            audio_data = io.BytesIO(response.content)
+            return audio_data
+        else:
+            print(f"Error: Received status code {response.status_code}")
+            return None
+        
     def add_to_queue(self, text):
         self.text_queue.put(text)
 
     def _request_audio_thread(self):
         while True:
             text = self.text_queue.get()
-            audio_data = tts_request(text)
+            audio_data = self.tts_request(text)
             if audio_data is None: continue
             self.audio_data_queue.put(audio_data)
             self.text_queue.task_done()
@@ -194,67 +157,103 @@ class AudioPlayer:
         self.is_playing = False
 
 
-def truncate_to_last_sentence(text):
-    last_punct = max(text.rfind('！'), text.rfind('。'), text.rfind('？'))
-    if last_punct != -1:
-        return text[:last_punct + 1]
-    return text
+class VoiceBot:
+    def __init__(self):
+        self.asr_url = "http://192.168.124.230:40062/api/v1/asr"
+        self.llm_client = OpenAI(
+            api_key="token_abc123" ,
+            base_url="http://192.168.124.230:40060/v1" ,
+        )
 
-def clean_text(text):
-    text = text.replace("\n", "")
-    text = text.replace("*", "")
-    return text
-
-
-def main():
-    audio_player = AudioPlayer()
-    recorder = AudioRecorder()
-    history = []
-
-    while True:
-        t0=time.time()
-        print("🎤开始采集声音... (请说话)")
-        audio_file = recorder.listen()
-        print(f"本次声音采集结束，耗时({time.time()-t0})s，开始处理...")
-        result = asr_request(audio_file)
-        query = result['result'][0]['clean_text']
-        if query is None or query.strip()=='': continue
-
-        messages = [
-            {"role": "system", "content": "You are a helpful assistant."},
-            *[{"role": "user" if i % 2 == 0 else "assistant", "content": msg} for i, msg in enumerate(sum(history, ()))],
-            {"role": "user", "content": f"{query}，请简洁回答，保持在50个字以内。"}
-        ]
+        self.audio_player = AudioPlayer()
+        self.audio_recorder = AudioRecorder()
+        self.history = []
+    
+    def stream_chat_response(self, messages):
+        response = self.llm_client.chat.completions.create(
+            model="Qwen2.5-1.5B-Instruct",
+            messages=messages,
+            stream=True
+        )
 
         full_text = ""
-        audio_chunk = ""
+        for chunk in response:
+            if chunk.choices[0].delta.content:
+                new_content = chunk.choices[0].delta.content
+                full_text += new_content
+                yield new_content, full_text
 
-        for new_content, full_text in stream_chat_response(messages):
-            audio_chunk += new_content
-
-            if ('！' in audio_chunk or '？' in audio_chunk or '。' in audio_chunk) and len(audio_chunk) > 55:
-                truncated_chunk = truncate_to_last_sentence(audio_chunk)
-                if truncated_chunk:
-                    cleaned_chunk = clean_text(truncated_chunk)
-                    audio_player.add_to_queue(cleaned_chunk)
-                    audio_chunk = audio_chunk[len(truncated_chunk):]
-
-        if audio_chunk:
-            truncated_chunk = truncate_to_last_sentence(audio_chunk)
-            if truncated_chunk:
-                audio_player.add_to_queue(truncated_chunk)
-            if len(audio_chunk) > len(truncated_chunk):
-                audio_player.add_to_queue(audio_chunk[len(truncated_chunk):])
+    def asr_request(self, prepared_file):
+        with open(prepared_file, 'rb') as f:
+            files = [('files', (prepared_file, f, 'audio/wav'))]
+            data = {'keys': prepared_file, 'lang': LANG}
+            response = requests.post(self.asr_url, files=files, data=data)
         
-        print("🎤USER: ", query)
-        print("🔉AI: ", full_text)
-        history.append((query, full_text))
-        history = history[-8:]
+        os.remove(prepared_file)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            print(f"ASR Error: Received status code {response.status_code}")
+            return None
 
-        audio_player.text_queue.join()
-        audio_player.audio_data_queue.join()
+    def truncate_to_last_sentence(self, text:str):
+        last_punct = max(text.rfind('！'), text.rfind('。'), text.rfind('？'))
+        if last_punct != -1:
+            return text[:last_punct + 1]
+        return text
+
+    def clean_text(self, text:str):
+        text = text.replace("\n", "")
+        text = text.replace("*", "")
+        return text
+    
+    def run(self):
+        while True:
+            t0=time.time()
+            print("🎤开始采集声音... (请说话)")
+            audio_file = self.audio_recorder.listen()
+            print(f"本次声音采集结束，耗时({time.time()-t0})s，开始处理...")
+            result = self.asr_request(audio_file)
+            query = result['result'][0]['clean_text']
+            if query is None or query.strip()=='': continue
+
+            messages = [
+                {"role": "system", "content": "You are a helpful assistant."},
+                *[{"role": "user" if i % 2 == 0 else "assistant", "content": msg} for i, msg in enumerate(sum(self.history, ()))],
+                {"role": "user", "content": f"{query}，请简洁回答，保持在50个字以内。"}
+            ]
+
+            full_text = ""
+            audio_chunk = ""
+
+            for new_content, full_text in self.stream_chat_response(messages):
+                audio_chunk += new_content
+
+                if ('！' in audio_chunk or '？' in audio_chunk or '。' in audio_chunk) and len(audio_chunk) > 55:
+                    truncated_chunk = self.truncate_to_last_sentence(audio_chunk)
+                    if truncated_chunk:
+                        cleaned_chunk = self.clean_text(truncated_chunk)
+                        self.audio_player.add_to_queue(cleaned_chunk)
+                        audio_chunk = audio_chunk[len(truncated_chunk):]
+
+            if audio_chunk:
+                truncated_chunk = self.truncate_to_last_sentence(audio_chunk)
+                if truncated_chunk:
+                    self.audio_player.add_to_queue(truncated_chunk)
+                if len(audio_chunk) > len(truncated_chunk):
+                    self.audio_player.add_to_queue(audio_chunk[len(truncated_chunk):])
+            
+            print("🎤USER: ", query)
+            print("🔉AI: ", full_text)
+            self.history.append((query, full_text))
+            if len(self.history)>8: self.history.pop(0)
+
+            self.audio_player.text_queue.join()
+            self.audio_player.audio_data_queue.join()
 
 
 if __name__ == '__main__':
-    main()
+    # main()
+    voice_bot=VoiceBot()
+    voice_bot.run()
 
