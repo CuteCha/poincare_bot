@@ -17,13 +17,12 @@ from openai import OpenAI
 AUDIO_RATE = 16000        
 AUDIO_CHANNELS = 1        
 CHUNK = 1024              
-OUTPUT_DIR = "./tmp/record_audios/"   
-folder_path = "./tmp/tts_audios/"
+OUTPUT_DIR = "./tmp/record_audios"   
+folder_path = "./tmp/tts_audios"
 NO_SPEECH_THRESHOLD = 1  
 audio_file_count = 0
 
 asr_url = "http://192.168.124.230:40062/api/v1/asr"
-tts_url = "http://192.168.124.230:40066/api/voice/tts"
 
 openai_api_key = "token_abc123" 
 openai_api_base = "http://192.168.124.230:40060/v1" 
@@ -177,12 +176,11 @@ def llm_request(messages):
     return response.choices[0].message.content
 
 
-def inference(TEMP_AUDIO_FILE):
-    audio_file = TEMP_AUDIO_FILE
+def inference(audio_file):
     print(f"audio_file: {audio_file}")
     result = asr_request(audio_file)
     query = result['result'][0]['clean_text']
-    print(f"ars: {query}")
+    print(f"asr: {query}")
     prompt=f"{query}，回答简短一些，保持50字以内！"
 
     
@@ -191,17 +189,17 @@ def inference(TEMP_AUDIO_FILE):
         {"role": "user", "content": prompt},
     ]
     output_text = llm_request(messages)
-    print("answer", output_text)
+    print(f"answer: {output_text}")
 
     text = output_text
     language, confidence = langid.classify(text)
     language_speaker = {
-    "ja" : "ja-JP-NanamiNeural",            # ok
-    "fr" : "fr-FR-DeniseNeural",            # ok
-    "es" : "ca-ES-JoanaNeural",             # ok
-    "de" : "de-DE-KatjaNeural",             # ok
-    "zh" : "zh-CN-XiaoyiNeural",            # ok
-    "en" : "en-US-AnaNeural",               # ok
+    "ja" : "ja-JP-NanamiNeural",            
+    "fr" : "fr-FR-DeniseNeural",            
+    "es" : "ca-ES-JoanaNeural",             
+    "de" : "de-DE-KatjaNeural",             
+    "zh" : "zh-CN-XiaoyiNeural",            
+    "en" : "en-US-AnaNeural",               
     }
 
     if language not in language_speaker.keys():
