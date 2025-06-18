@@ -9,7 +9,6 @@ import pygame
 import edge_tts
 import asyncio
 import langid
-from langdetect import detect
 import requests
 from openai import OpenAI
 
@@ -17,22 +16,20 @@ from openai import OpenAI
 AUDIO_RATE = 16000        
 AUDIO_CHANNELS = 1        
 CHUNK = 1024              
-OUTPUT_DIR = "./tmp/record_audios"   
-folder_path = "./tmp/tts_audios"
+RECORD_DIR = "./tmp/record_audios"   
+SPEAK_DIR = "./tmp/tts_audios"
 NO_SPEECH_THRESHOLD = 1  
 audio_file_count = 0
+history = []
 
 asr_url = "http://192.168.124.230:40062/api/v1/asr"
-
-openai_api_key = "token_abc123" 
-openai_api_base = "http://192.168.124.230:40060/v1" 
 llm_client = OpenAI(
-    api_key=openai_api_key,
-    base_url=openai_api_base,
+    api_key="token_abc123",
+    base_url="http://192.168.124.230:40060/v1",
 )
 
-os.makedirs(OUTPUT_DIR, exist_ok=True)
-os.makedirs(folder_path, exist_ok=True)
+os.makedirs(RECORD_DIR, exist_ok=True)
+os.makedirs(SPEAK_DIR, exist_ok=True)
 
 last_active_time = time.time()
 segments_to_save = []
@@ -102,7 +99,7 @@ def save_audio():
     global segments_to_save, last_vad_end_time, saved_intervals, audio_file_count
 
     audio_file_count += 1
-    audio_output_path = f"{OUTPUT_DIR}/audio_{audio_file_count}.wav"
+    audio_output_path = f"{RECORD_DIR}/audio_{audio_file_count}.wav"
 
     if not segments_to_save:
         return
@@ -129,7 +126,7 @@ def save_audio():
     wf.close()
     print(f"音频保存至 {audio_output_path}")    
     
-    inference_thread = threading.Thread(target=inference, args=(audio_output_path,))
+    inference_thread = threading.Thread(target=inference, args=(audio_output_path,), daemon=True)
     inference_thread.start()
 
     saved_intervals.append((start_time, end_time))
@@ -154,10 +151,10 @@ async def amain(TEXT, VOICE, OUTPUT_FILE) -> None:
     await communicate.save(OUTPUT_FILE)
 
 
-def asr_request(prepared_file):
-    with open(prepared_file, 'rb') as f:
-        files = [('files', (prepared_file, f, 'audio/wav'))]
-        data = {'keys': prepared_file, 'lang': "zh"}
+def asr_request(audio_file):
+    with open(audio_file, 'rb') as f:
+        files = [('files', (audio_file, f, 'audio/wav'))]
+        data = {'keys': audio_file, 'lang': "zh"}
         response = requests.post(asr_url, files=files, data=data)
     
     if response.status_code == 200:
@@ -177,29 +174,34 @@ def llm_request(messages):
 
 
 def inference(audio_file):
+    global history, audio_file_count
     print(f"audio_file: {audio_file}")
     result = asr_request(audio_file)
-    query = result['result'][0]['clean_text']
-    print(f"asr: {query}")
-    prompt=f"{query}，回答简短一些，保持50字以内！"
+    query_text = result['result'][0]['clean_text']
+    print(f"asr: {query_text}")
+    prompt=f"{query_text}，回答简短一些，保持50字以内！"
 
     
     messages = [
-        {"role": "system", "content": "你叫千问，是一个18岁的女大学生，性格活泼开朗，说话俏皮"},
-        {"role": "user", "content": prompt},
+        {"role": "system", "content": "You are a helpful assistant."},
+        *[{"role": "user" if i % 2 == 0 else "assistant", "content": msg} for i, msg in enumerate(sum(history, ()))],
+        {"role": "user", "content": prompt}
     ]
-    output_text = llm_request(messages)
-    print(f"answer: {output_text}")
+    answer_text = llm_request(messages)
+    print(f"answer: {answer_text}")
 
-    text = output_text
+    history.append((query_text, answer_text))
+    if len(history)>8: history.pop(0)
+
+    text = answer_text
     language, confidence = langid.classify(text)
     language_speaker = {
-    "ja" : "ja-JP-NanamiNeural",            
-    "fr" : "fr-FR-DeniseNeural",            
-    "es" : "ca-ES-JoanaNeural",             
-    "de" : "de-DE-KatjaNeural",             
-    "zh" : "zh-CN-XiaoyiNeural",            
-    "en" : "en-US-AnaNeural",               
+        "ja" : "ja-JP-NanamiNeural",            
+        "fr" : "fr-FR-DeniseNeural",            
+        "es" : "ca-ES-JoanaNeural",             
+        "de" : "de-DE-KatjaNeural",             
+        "zh" : "zh-CN-XiaoyiNeural",            
+        "en" : "en-US-AnaNeural",               
     }
 
     if language not in language_speaker.keys():
@@ -208,14 +210,13 @@ def inference(audio_file):
         used_speaker = language_speaker[language]
         print("检测到语种：", language, "使用音色：", language_speaker[language])
 
-    global audio_file_count
-    asyncio.run(amain(text, used_speaker, os.path.join(folder_path,f"sft_{audio_file_count}.mp3")))
-    play_audio(f'{folder_path}/sft_{audio_file_count}.mp3')
+    asyncio.run(amain(text, used_speaker, os.path.join(SPEAK_DIR,f"sft_{audio_file_count}.mp3")))
+    play_audio(f'{SPEAK_DIR}/sft_{audio_file_count}.mp3')
 
 
 if __name__ == "__main__":
     try:
-        audio_thread = threading.Thread(target=audio_recorder)
+        audio_thread = threading.Thread(target=audio_recorder, daemon=True)
         audio_thread.start()
         
         print("按 Ctrl+C 停止录制")
