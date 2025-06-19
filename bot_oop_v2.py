@@ -153,7 +153,7 @@ class VoiceBot:
                 time.sleep(0.1) 
     
     def check_vad_activity(self, audio_data):
-        num, rate = 0, 0.8
+        num, rate = 0, 0.4
         step = int(self.AUDIO_RATE * 0.02) 
         flag_rate = round(rate * len(audio_data) // step)
 
