@@ -11,6 +11,7 @@ import asyncio
 import langid
 import requests
 from openai import OpenAI
+from modelscope.pipelines import pipeline
 
 
 SYS_ROLE_LIMITS='''
@@ -59,12 +60,18 @@ class VoiceBot:
         )
         self.audio = pyaudio.PyAudio()
         self.stream = None
+        self.use_sv = True
+        self.sv_erolled = False
+        self.eroll_sv_path = "./tmp/eroll_sv/user0.wav"
+        self.sv_pipeline = None
+        self.use_kws = True
         
         self.setup()
 
     def setup(self):
         os.makedirs(self.RECORD_DIR, exist_ok=True)
         os.makedirs(self.SPEAK_DIR, exist_ok=True)
+
         self.stream = self.audio.open(
             format=pyaudio.paInt16,
             channels=self.AUDIO_CHANNELS,
@@ -72,6 +79,48 @@ class VoiceBot:
             input=True,
             frames_per_buffer=self.AUDIO_CHUNK * 2
         )
+
+        if self.use_sv:
+            print("系统需要声纹识别，正在初始化声纹检测模型......")
+            self.sv_pipeline = pipeline(
+                task='speaker-verification',
+                model='./model/speech_campplus_sv_zh-cn_16k-common',
+                model_revision='v1.0.0'
+            )
+            print("声纹检测模型加载完成✅")
+    
+    def sv_eroll(self):
+        if self.sv_erolled or not self.use_sv:
+            return
+        
+        audio_frames = [seg[0] for seg in self.segments_to_save]
+        print("正在进行声纹注册.....")
+        os.makedirs("./tmp/eroll_sv", exist_ok=True)
+        audio_output_path = self.eroll_sv_path
+        audio_length = 0.5 * len(self.segments_to_save)
+
+        if audio_length < 3:
+            print("声纹注册语音需大于3秒，请重新注册")
+            return 
+        
+        self.wave_dump(audio_frames, audio_output_path)
+        text = "声纹注册成功，现在只有您可以命令我了。"
+        print(f"answer: {text}")
+        used_speaker = "zh-CN-XiaoyiNeural"
+        output_file = f"{self.SPEAK_DIR}/sft_tmp.mp3"
+        asyncio.run(tts_request(text, used_speaker, output_file))
+        self.play_audio(output_file)
+        self.segments_to_save.clear()
+        self.sv_erolled = True
+
+    def wave_dump(self, audio_frames, audio_output_path):
+        wf = wave.open(audio_output_path, 'wb')
+        wf.setnchannels(self.AUDIO_CHANNELS)
+        wf.setsampwidth(2)  # 16-bit PCM
+        wf.setframerate(self.AUDIO_RATE)
+        wf.writeframes(b''.join(audio_frames))
+        wf.close()
+        print(f"音频保存至 {audio_output_path}")
 
     def audio_record(self):
         audio_buffer = []
@@ -94,7 +143,10 @@ class VoiceBot:
                 
                 if time.time() - self.last_active_time > self.NO_SPEECH_THRESHOLD:
                     if self.segments_to_save and self.segments_to_save[-1][1] > self.last_vad_end_time:
-                        self.save_audio()
+                        if not self.sv_erolled and self.use_sv:
+                            self.sv_eroll()
+                        else:
+                            self.save_audio()
                         self.last_active_time = time.time()
             except IOError as e:
                 print(f"音频读取错误: {e}，继续录制...")
@@ -137,13 +189,7 @@ class VoiceBot:
             return
         
         audio_frames = [seg[0] for seg in self.segments_to_save]
-        wf = wave.open(audio_output_path, 'wb')
-        wf.setnchannels(self.AUDIO_CHANNELS)
-        wf.setsampwidth(2)  # 16-bit PCM
-        wf.setframerate(self.AUDIO_RATE)
-        wf.writeframes(b''.join(audio_frames))
-        wf.close()
-        print(f"音频保存至 {audio_output_path}")    
+        self.wave_dump(audio_frames, audio_output_path)
         
         inference_thread = threading.Thread(target=self.inference, args=(audio_output_path,), daemon=True)
         inference_thread.start()
@@ -152,6 +198,17 @@ class VoiceBot:
         self.segments_to_save.clear()
 
     def inference(self, audio_file):
+        if self.use_sv:
+            sv_score = self.sv_pipeline([self.eroll_sv_path, audio_file], thr=0.35)
+            print(f"sv_score: {sv_score}")
+            if sv_score['text'] != "yes": 
+                answer_text = "很抱歉，声纹验证失败，我无法为您服务"
+                print(f"answer: {answer_text}")
+                used_speaker = "zh-CN-XiaoyiNeural"
+                asyncio.run(tts_request(answer_text, used_speaker, os.path.join(self.SPEAK_DIR, f"sft_{self.audio_file_count}.mp3")))
+                self.play_audio(f'{self.SPEAK_DIR}/sft_{self.audio_file_count}.mp3')
+                return
+
         print(f"audio_file: {audio_file}")
         result = self.asr_request(audio_file)
         query_text = result['result'][0]['clean_text']
