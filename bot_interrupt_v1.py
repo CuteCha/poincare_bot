@@ -22,10 +22,10 @@ NO_SPEECH_THRESHOLD = 1
 audio_file_count = 0
 history = []
 
-asr_url = "http://192.168.124.230:40062/api/v1/asr"
+asr_url = "http://172.16.40.230:40062/api/v1/asr"
 llm_client = OpenAI(
     api_key="token_abc123",
-    base_url="http://192.168.124.230:40060/v1",
+    base_url="http://172.16.40.230:40060/v1",
 )
 
 os.makedirs(RECORD_DIR, exist_ok=True)
@@ -45,6 +45,7 @@ def audio_recorder():
                     channels=AUDIO_CHANNELS,
                     rate=AUDIO_RATE,
                     input=True,
+                    input_device_index=0, #插上耳机时，输入设备用耳机话筒
                     frames_per_buffer=CHUNK*2)
     
     audio_buffer = []
@@ -134,7 +135,7 @@ def save_audio():
 
 def play_audio(file_path):
     try:
-        pygame.mixer.init()
+        pygame.mixer.init(devicename='MacBook Pro扬声器') #插上耳机时，用耳机话筒拾音，用mac扬声器播音
         pygame.mixer.music.load(file_path)
         pygame.mixer.music.play()
         while pygame.mixer.music.get_busy():
