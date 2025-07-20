@@ -98,11 +98,11 @@ def _test_audio_recorder():
 
 class V2VLMM:
     def __init__(self):
-        self.asr_url = "http://192.168.124.230:40062/api/v1/asr"
-        self.tts_url = "http://192.168.124.230:40066/api/voice/tts"
+        self.asr_url = "http://172.16.40.230:40062/api/v1/asr"
+        self.tts_url = "http://172.16.40.230:40066/api/voice/tts"
         self.llm_client = OpenAI(
             api_key="token_abc123" ,
-            base_url="http://192.168.124.230:40060/v1" ,
+            base_url="http://172.16.40.230:40060/v1" ,
         )
         self.history = []
         self.is_playing = False

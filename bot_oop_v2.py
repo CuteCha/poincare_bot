@@ -53,10 +53,10 @@ class VoiceBot:
         self.segments_to_save = []
         self.saved_intervals = []
         self.last_vad_end_time = 0  
-        self.asr_url = "http://192.168.124.230:40062/api/v1/asr"
+        self.asr_url = "http://172.16.40.230:40062/api/v1/asr"
         self.llm_client = OpenAI(
             api_key="token_abc123",
-            base_url="http://192.168.124.230:40060/v1",
+            base_url="http://172.16.40.230:40060/v1",
         )
         self.audio = pyaudio.PyAudio()
         self.stream = None
