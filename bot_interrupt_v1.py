@@ -45,7 +45,7 @@ def audio_recorder():
                     channels=AUDIO_CHANNELS,
                     rate=AUDIO_RATE,
                     input=True,
-                    input_device_index=0, #插上耳机时，输入设备用耳机话筒
+                    input_device_index=1, #加blackhole，插上耳机时，输入设备用耳机话筒
                     frames_per_buffer=CHUNK*2)
     
     audio_buffer = []
@@ -135,7 +135,7 @@ def save_audio():
 
 def play_audio(file_path):
     try:
-        pygame.mixer.init(devicename='MacBook Pro扬声器') #插上耳机时，用耳机话筒拾音，用mac扬声器播音
+        pygame.mixer.init(devicename='speaker_blackhole') #插上耳机时，加上blackhole，用耳机话筒拾音，用mac扬声器播音
         pygame.mixer.music.load(file_path)
         pygame.mixer.music.play()
         while pygame.mixer.music.get_busy():
