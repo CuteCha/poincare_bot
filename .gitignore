@@ -6,3 +6,6 @@ data/
 model/
 tmp/
 __pycache__/
+./eco_bot/cache/
+key_config.py
+log.txt
