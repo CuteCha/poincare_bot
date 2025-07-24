@@ -72,7 +72,7 @@ class VoiceBot:
                 
                 if time.time() - self.last_active_time > self.NO_SPEECH_THRESHOLD:
                     if self.segments_to_save and self.segments_to_save[-1][1] > self.last_vad_end_time:
-                        self.save_audio()
+                        self.process_audio()
                         self.last_active_time = time.time()
             except IOError as e:
                 print(f"音频读取错误: {e}，继续录制...")
@@ -93,7 +93,7 @@ class VoiceBot:
             return True
         return False
     
-    def save_audio(self):
+    def process_audio(self):
         pygame.mixer.init()
         self.audio_file_count += 1
         mic_audio_file = f"{self.CACHE_DIR}/mic_{self.audio_file_count}.wav"
