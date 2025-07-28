@@ -10,7 +10,7 @@ import ssl
 from wsgiref.handlers import format_date_time
 from datetime import datetime
 from time import mktime
-import _thread as thread
+import threading
 import os
 from key_config import TTSconfig
 
@@ -89,7 +89,8 @@ class TTS():
         print("### error:", error)
 
     def on_close(self, ws, close_status_code, close_msg):
-        print(f"连接已关闭，状态码: {close_status_code}, 消息: {close_msg}")
+        # print(f"连接已关闭，状态码: {close_status_code}, 消息: {close_msg}")
+        pass
 
     def on_open(self, ws):
         audio_file=self.audio_file
@@ -103,13 +104,12 @@ class TTS():
             if os.path.exists(audio_file):
                 os.remove(audio_file)
 
-        thread.start_new_thread(run, ())
+        threading.Thread(target=run, daemon=True).start()
 
     def request(self):
         websocket.enableTrace(False)
         wsUrl = self.wsParam.create_url()
-        ws = websocket.WebSocketApp(wsUrl, on_message=self.on_message, on_error=self.on_error, on_close=self.on_close)
-        ws.on_open = self.on_open
+        ws = websocket.WebSocketApp(wsUrl, on_open=self.on_open, on_message=self.on_message, on_error=self.on_error, on_close=self.on_close)
         ws.run_forever(sslopt={"cert_reqs": ssl.CERT_NONE})
 
 
