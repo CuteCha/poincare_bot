@@ -15,7 +15,7 @@ import os
 from key_config import TTSconfig
 
 
-class TTS():
+class TTS:
     def __init__(self, text, audio_file="./tmp/output.mp3"):
         self.audio_file = audio_file
         self.wsParam=self.WsParam(
