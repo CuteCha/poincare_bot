@@ -18,22 +18,30 @@ from key_config import TTSconfig
 class TTS():
     def __init__(self, text, audio_file="./tmp/output.mp3"):
         self.audio_file = audio_file
-        self.wsParam=self.Ws_Param(
+        self.wsParam=self.WsParam(
             text=text,
             APPID=TTSconfig.appid, 
             APIKey=TTSconfig.apikey,
             APISecret=TTSconfig.apisecret
         )
 
-    class Ws_Param(object):
-        def __init__(self, text, APPID, APIKey, APISecret):
+        self.ws = websocket.WebSocketApp(
+            url=self.wsParam.create_url(), 
+            on_open=self.on_open, 
+            on_message=self.on_message, 
+            on_error=self.on_error, 
+            on_close=self.on_close
+        )
+
+    class WsParam(object):
+        def __init__(self, text:str, APPID:str, APIKey:str, APISecret:str):
             self.APPID = APPID
             self.APIKey = APIKey
             self.APISecret = APISecret
             self.Text = text
 
             self.CommonArgs = {"app_id": self.APPID}
-            self.BusinessArgs = {"aue": "lame", "auf": "audio/L16;rate=16000", "vcn": "x4_lingfeichen_assist", "tte": "utf8"}
+            self.BusinessArgs = {"aue": "lame", "auf": "audio/L16;rate=16000", "vcn": "x4_lingfeichen_assist", "tte": "utf8", "speed": 45, "volume": 100}
             self.Data = {"status": 2, "text": str(base64.b64encode(self.Text.encode('utf-8')), "UTF8")}
 
         def create_url(self):
@@ -41,25 +49,16 @@ class TTS():
             now = datetime.now()
             date = format_date_time(mktime(now.timetuple()))
 
-            signature_origin = "host: " + "ws-api.xfyun.cn" + "\n"
-            signature_origin += "date: " + date + "\n"
-            signature_origin += "GET " + "/v2/tts " + "HTTP/1.1"
+            signature_origin = f"host: ws-api.xfyun.cn\ndate: {date}\nGET /v2/tts HTTP/1.1"
             signature_sha = hmac.new(self.APISecret.encode('utf-8'), signature_origin.encode('utf-8'), digestmod=hashlib.sha256).digest()
-            signature_sha = base64.b64encode(signature_sha).decode(encoding='utf-8')
+            signature = base64.b64encode(signature_sha).decode(encoding='utf-8')
 
-            authorization_origin = "api_key=\"%s\", algorithm=\"%s\", headers=\"%s\", signature=\"%s\"" % (
-                self.APIKey, "hmac-sha256", "host date request-line", signature_sha)
+            authorization_origin = f'api_key="{self.APIKey}", algorithm="hmac-sha256", headers="host date request-line", signature="{signature}"'
             authorization = base64.b64encode(authorization_origin.encode('utf-8')).decode(encoding='utf-8')
 
-            v = {
-                "authorization": authorization,
-                "date": date,
-                "host": "ws-api.xfyun.cn"
-            }
+            v = {"authorization": authorization, "date": date, "host": "ws-api.xfyun.cn"}
 
-            url = url + '?' + urlencode(v)
-
-            return url
+            return url + '?' + urlencode(v)
 
     def on_message(self, ws, message):
         audio_file = self.audio_file
@@ -108,9 +107,7 @@ class TTS():
 
     def request(self):
         websocket.enableTrace(False)
-        wsUrl = self.wsParam.create_url()
-        ws = websocket.WebSocketApp(wsUrl, on_open=self.on_open, on_message=self.on_message, on_error=self.on_error, on_close=self.on_close)
-        ws.run_forever(sslopt={"cert_reqs": ssl.CERT_NONE})
+        self.ws.run_forever(sslopt={"cert_reqs": ssl.CERT_NONE})
 
 
 if __name__ == "__main__":
