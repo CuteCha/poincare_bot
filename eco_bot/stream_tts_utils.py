@@ -64,10 +64,17 @@ class TTS:
 
     def on_message(self, ws, message):
         try:
+            if message is None or not isinstance(message, str): return
             message =json.loads(message)
             code = message["code"]
             sid = message["sid"]
+            
+            if "data" not in message: return
+            if "audio" not in message["data"]: return
+
             audio = message["data"]["audio"]
+            if audio is None or audio == "": return
+
             audio = base64.b64decode(audio)
             status = message["data"]["status"]
 
