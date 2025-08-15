@@ -1,7 +1,6 @@
-import dashscope
 from dashscope import Application
 from http import HTTPStatus
-import re, os
+import re
 from key_config import LLMconfig
 
 def extract_clean_text(text: str) -> str:
@@ -10,7 +9,7 @@ def extract_clean_text(text: str) -> str:
     return re.sub(r'\s+', ' ', text).strip(" \n，、。")
 
 def request(text: str):
-    dashscope.api_key = LLMconfig.api_key
+    API_KEY = LLMconfig.api_key
     APP_ID= LLMconfig.app_id
 
     session_id=None
@@ -20,7 +19,7 @@ def request(text: str):
     responses = Application.call(
         app_id=APP_ID,
         prompt=user_text,
-        api_key=os.getenv("DASHSCOPE_API_KEY"),
+        api_key=API_KEY,
         session_id=session_id,
         stream=True,
         incremental_output=True
